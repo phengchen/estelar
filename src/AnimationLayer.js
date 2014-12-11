@@ -14,7 +14,7 @@ var AnimationLayer = cc.Layer.extend({
     nTouchFrame:0,
     _drawNode:null,
     spacecraft:null,            //飞船
-    fScaleSpacecraft:0.02,      //飞船比例
+    fScaleSpacecraft:0.2,      //飞船比例
     posSpacecraft:cc.p(20,20),  //飞船起飞点
     aryPlant:null,              //星球数组
     posDoor:cc.p(1100,100),     //门的位置
