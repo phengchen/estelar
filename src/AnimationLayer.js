@@ -12,24 +12,28 @@ var AnimationLayer = cc.Layer.extend({
     bTouchAdd:false,
     bTouchMinus:false,
     nTouchFrame:0,
-    spacecraft:null,        //飞船
-    fScaleSpacecraft:0.02,   //飞船比例
-    posSpacecraft:cc.p(20,20),//飞船起飞点
-    aryPlant:null,          //星球数组
-    posDoor:cc.p(1100,100),   //门的位置
-    nStartPower:10,          //起始能量
-    nCraftPower:10,          //当前能量
-    nMaxPower:60,           //能量上限
-    nMinPower:0,            //能量下限
-    nPowerPerAdd:2,         //每次能量递增数
-    nPowerPerMinus:2,       //每次能量递减数
-    nFriction:10,            //摩擦力
-    startSpeed:50,          //飞船起始速度
-    minSpeed:10,            //最小飞行速度
-    maxSpeed:150,           //最大飞行速度
-    fScaleGravity:2,      //星球引力倍数
-    bClockwise:true,        //是否为顺时针
-    bTouchWin:false,        //是否触碰到门
+    _drawNode:null,
+    spacecraft:null,            //飞船
+    fScaleSpacecraft:0.2,      //飞船比例
+    posSpacecraft:cc.p(20,20),  //飞船起飞点
+    aryPlant:null,              //星球数组
+    posDoor:cc.p(1100,100),     //门的位置
+    nStartPower:10,             //起始能量
+    nCraftPower:10,             //当前能量
+    nMaxPower:60,               //能量上限
+    nMinPower:0,                //能量下限
+    nPowerPerAdd:2,             //每次能量递增数
+    nPowerPerMinus:2,           //每次能量递减数
+    nFriction:10,               //摩擦力
+    startSpeed:50,              //飞船起始速度
+    minSpeed:10,                //最小飞行速度
+    maxSpeed:150,               //最大飞行速度
+    fScaleGravity:2,            //星球引力倍数
+    bClockwise:true,            //是否为顺时针
+    bTouchWin:false,            //是否触碰到门
+    _curGravityForce:cc.p(0,0), //当前星球引力为多少
+    _curFriction:cc.p(0,0),     //当前摩擦力
+    _curPower:cc.p(0,0),        //当前推动力
     curSpeed:50,
     ctor:function (space) {
         this._super();
@@ -90,6 +94,9 @@ var AnimationLayer = cc.Layer.extend({
                 cc.log("release");
             }
         }), this);
+
+        this._drawNode = new cc.DrawNode();
+        this.addChild(this._drawNode, 10);
 
         this.scheduleUpdate();
 
@@ -340,7 +347,7 @@ var AnimationLayer = cc.Layer.extend({
         var plant = shapes[1];
 
         //kg单位
-        var mPlantGravity = gameLayer.fScaleGravity*6.672*(5.515 * plant.r*Math.PI*4/3)/1500;
+        var mPlantGravity = gameLayer.fScaleGravity*6.672*(5.515 * plant.r*Math.PI*4/3)/1000;
 
         var bodyPlayer = player.getBody();
         var posPlayer =  bodyPlayer.getPos();
@@ -359,7 +366,7 @@ var AnimationLayer = cc.Layer.extend({
             angle = Math.atan(posOffset);
         }
 
-        bodyPlayer.resetForces();
+        //bodyPlayer.resetForces();
 
         var x = mPlantGravity*Math.cos(angle);
         var y = mPlantGravity*Math.sin(angle);
@@ -385,13 +392,15 @@ var AnimationLayer = cc.Layer.extend({
             x = -x;
         }
 
-        bodyPlayer.applyForce(cp.v(x ,y), cp.v(0,0));
+        gameLayer._curGravityForce = cc.p(x, y);
+
+        //bodyPlayer.applyForce(cp.v(x ,y), cp.v(0,0));
 
         //计算与引力垂直的力
+        var posVel = bodyPlayer.getVel();//获得飞行速度向量
         if(bPrePlant == false)
         {
             //第一次进入引力圈
-            var posVel = bodyPlayer.getVel();
             if(posVel.x < 0)
             {
                 //逆时针旋转
@@ -418,7 +427,8 @@ var AnimationLayer = cc.Layer.extend({
             velPow = cp.v(-y*ratio, x*ratio);
         }
 
-        bodyPlayer.applyForce(velPow, cp.v(0,0));
+        gameLayer._curPower = cc.p(velPow.x, velPow.y);
+        //bodyPlayer.applyForce(velPow, cp.v(0,0));
 
         //摩擦力
         var speed = bodyPlayer.getVel();
@@ -426,8 +436,8 @@ var AnimationLayer = cc.Layer.extend({
         var nFriction = speedLength/3;
         ratio = nFriction/speedLength;
         var velFriction = cp.v(-speed.x*ratio, - speed.y*ratio);
-        bodyPlayer.applyForce(velFriction, cp.v(0,0));
-
+        //bodyPlayer.applyForce(velFriction, cp.v(0,0));
+        gameLayer._curFriction = cc.p(velFriction.x, velFriction.y);
 
 
         //当小于某个距离表示装上了，停止下来,暂时注释
@@ -482,30 +492,41 @@ var AnimationLayer = cc.Layer.extend({
 
         if(bPrePlant != bClosePlant && bPrePlant == true)
         {
-            //刚刚离开
-            var BodySpacecraft = this.spacecraft.getBody();
-            BodySpacecraft.resetForces();
+            //刚刚离开(即第一次离开，清除所有力相关数据)
+            this._curGravityForce = cc.p(0,0);
+            this._curPower = cc.p(0,0);
+            this._curFriction = cc.p(0,0);
+            //var BodySpacecraft = this.spacecraft.getBody();
+            //BodySpacecraft.resetForces();
         }
         bPrePlant = bClosePlant;
 
+        var BodySpace = this.spacecraft.getBody();
+        var vel = BodySpace.getVel();
+
         if(!bClosePlant && this.spacecraft != null)
         {
-            var Body = this.spacecraft.getBody();
-            var force = this.nCraftPower - this.nFriction;
-            var vel = Body.getVel();
+            //无引力情况下，只考虑动力和摩擦力
             var lengthBody = Math.sqrt(vel.x*vel.x +vel.y*vel.y);
-            var ratio = force/lengthBody;
-            var velPow = cp.v(vel.x*ratio, vel.y*ratio);
-            Body.applyForce(velPow, cp.v(0,0));
+            var ratioPower = this.nCraftPower/lengthBody;
+            var ratioFriction = this.nFriction/lengthBody;
+            this._curPower = cc.p(vel.x*ratioPower, vel.y*ratioPower);
+            this._curFriction = cc.p(-vel.x*ratioFriction, -vel.y*ratioFriction);
+            //Body.resetForces();
+            //Body.applyForce(velPow, cp.v(0,0));
             if(this.nCraftPower < this.nFriction && lengthBody < this.minSpeed)
             {
                 this.nCraftPower = this.nStartPower;
-                Body.resetForces();
+                this._curPower = cc.p(0,0);
+                this._curFriction = cc.p(0,0);
+                //Body.resetForces();
             }
             if(lengthBody > this.maxSpeed && this.nCraftPower > this.nFriction)
             {
                 //如果速度大于最大速度，并且能量正在推进的时候，只为最大速度
-                Body.resetForces();
+                this._curPower = cc.p(0,0);
+                this._curFriction = cc.p(0,0);
+                //Body.resetForces();
             }
         }
         else
@@ -513,5 +534,26 @@ var AnimationLayer = cc.Layer.extend({
             bClosePlant = false;
         }
 
+        //以下代码为渲染力的线，以及对物体进行力的详细赋值
+        this._drawNode.clear();
+
+        BodySpace.resetForces();
+        var posStart = BodySpace.getPos();
+
+        var posPower = cc.p(posStart.x + this._curPower.x, posStart.y + this._curPower.y);
+        this._drawNode.drawSegment(posStart, posPower, 1, cc.color(255, 0, 0, 255));
+        BodySpace.applyForce(cp.v(this._curPower.x, this._curPower.y), cp.v(0,0));
+
+        var posGravity = cc.p(posStart.x + this._curGravityForce.x, posStart.y + this._curGravityForce.y);
+        this._drawNode.drawSegment(posStart, posGravity, 1, cc.color(0, 255, 0, 255));
+        BodySpace.applyForce(cp.v(this._curGravityForce.x, this._curGravityForce.y), cp.v(0,0));
+
+        var posFriction = cc.p(posStart.x + this._curFriction.x, posStart.y + this._curFriction.y);
+        this._drawNode.drawSegment(posStart, posFriction, 1, cc.color(0, 0, 255, 255));
+        BodySpace.applyForce(cp.v(this._curFriction.x, this._curFriction.y), cp.v(0,0));
+
+        var force = BodySpace.f;
+        var posForce = cc.p(posStart.x + force.x, posStart.y + force.y);
+        this._drawNode.drawSegment(posStart, posForce, 1, cc.color(255, 255, 0, 255));
     }
 });
